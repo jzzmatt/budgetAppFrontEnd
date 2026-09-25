@@ -1,0 +1,486 @@
+From 2d8369f3eb81cc268c4350d28881d1a20fd21979 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Fri, 25 Sep 2026 13:30:26 +0000
+Subject: [PATCH] Add sidebar hide toggle for desktop layout
+
+Introduce a menu button on the sidebar brand row to collapse navigation on
+wide screens, with a matching control in the page header to show it again.
+Persist the preference in localStorage and add localized aria labels.
+---
+ app/globals.css                              | 78 ++++++++++++++++++++
+ components/layout/app-shell-layout.tsx       | 70 ++++++++++++++++++
+ components/layout/app-shell.tsx              | 54 ++++++--------
+ components/layout/app-sidebar-toggle.tsx     | 46 ++++++++++++
+ components/layout/sidebar-layout-context.tsx | 32 ++++++++
+ components/layout/use-sidebar-collapsed.ts   | 52 +++++++++++++
+ lib/i18n/messages/en.ts                      |  2 +
+ lib/i18n/messages/fr.ts                      |  2 +
+ lib/i18n/messages/pt.ts                      |  2 +
+ lib/i18n/types.ts                            |  2 +
+ 10 files changed, 307 insertions(+), 33 deletions(-)
+ create mode 100644 components/layout/app-shell-layout.tsx
+ create mode 100644 components/layout/app-sidebar-toggle.tsx
+ create mode 100644 components/layout/sidebar-layout-context.tsx
+ create mode 100644 components/layout/use-sidebar-collapsed.ts
+
+diff --git a/app/globals.css b/app/globals.css
+index a111e46..999a5a3 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -484,6 +484,13 @@ select {
+   gap: 28px;
+ }
+ 
++.app-sidebar-brand-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++}
++
+ .app-sidebar-brand {
+   margin: 0;
+   font-size: 14px;
+@@ -491,6 +498,54 @@ select {
+   letter-spacing: 0.02em;
+ }
+ 
++.app-sidebar-toggle {
++  display: none;
++  flex-shrink: 0;
++  align-items: center;
++  justify-content: center;
++  width: 36px;
++  height: 36px;
++  border: 1px solid rgb(255 255 255 / 12%);
++  border-radius: var(--radius-md);
++  background: transparent;
++  color: #cbd5e1;
++  cursor: pointer;
++  transition:
++    background-color 0.15s ease,
++    border-color 0.15s ease,
++    color 0.15s ease;
++}
++
++.app-sidebar-toggle:hover,
++.app-sidebar-toggle:focus-visible {
++  background: rgb(255 255 255 / 8%);
++  border-color: rgb(255 255 255 / 20%);
++  color: #ffffff;
++  outline: none;
++}
++
++.app-header-leading {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  min-width: 0;
++  flex: 1;
++}
++
++.app-header-sidebar-toggle {
++  display: none;
++  border-color: var(--border);
++  color: var(--muted-foreground);
++  background: var(--surface);
++}
++
++.app-header-sidebar-toggle:hover,
++.app-header-sidebar-toggle:focus-visible {
++  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
++  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
++  color: var(--primary);
++}
++
+ .app-sidebar-nav {
+   display: grid;
+   gap: 4px;
+@@ -2090,6 +2145,24 @@ select {
+   margin: 20px 0 0;
+ }
+ 
++@media (min-width: 901px) {
++  .app-sidebar-toggle {
++    display: inline-flex;
++  }
++
++  .app-shell-sidebar-collapsed {
++    grid-template-columns: 1fr;
++  }
++
++  .app-shell-sidebar-collapsed .app-sidebar {
++    display: none;
++  }
++
++  .app-shell-sidebar-collapsed .app-header-sidebar-toggle {
++    display: inline-flex;
++  }
++}
++
+ @media (max-width: 900px) {
+   .app-shell {
+     grid-template-columns: 1fr;
+@@ -2110,6 +2183,11 @@ select {
+     text-align: center;
+   }
+ 
++  .app-header-leading {
++    flex-direction: column;
++    width: 100%;
++  }
++
+   .app-header-copy {
+     width: 100%;
+   }
+diff --git a/components/layout/app-shell-layout.tsx b/components/layout/app-shell-layout.tsx
+new file mode 100644
+index 0000000..c3a87f4
+--- /dev/null
++++ b/components/layout/app-shell-layout.tsx
+@@ -0,0 +1,70 @@
++"use client";
++
++import { type ReactNode } from "react";
++import { AppBottomNav } from "@/components/layout/app-bottom-nav";
++import { AppMobileSignOut } from "@/components/layout/app-mobile-sign-out";
++import { AppSidebarToggle } from "@/components/layout/app-sidebar-toggle";
++import { LanguageSelector } from "@/components/i18n/language-selector";
++import { SidebarLayoutProvider } from "@/components/layout/sidebar-layout-context";
++import { useSidebarCollapsed } from "@/components/layout/use-sidebar-collapsed";
++
++type AppShellLayoutProps = {
++  skipToContentLabel: string;
++  title: string;
++  description?: string;
++  actions?: ReactNode;
++  clerkReady: boolean;
++  sidebarTop: ReactNode;
++  sidebarLocale: ReactNode;
++  sidebarUser: ReactNode;
++  children: ReactNode;
++};
++
++export function AppShellLayout({
++  skipToContentLabel,
++  title,
++  description,
++  actions,
++  clerkReady,
++  sidebarTop,
++  sidebarLocale,
++  sidebarUser,
++  children,
++}: AppShellLayoutProps) {
++  const { collapsed, toggleSidebar } = useSidebarCollapsed();
++
++  return (
++    <SidebarLayoutProvider collapsed={collapsed} toggleSidebar={toggleSidebar}>
++      <div className={`app-shell${collapsed ? " app-shell-sidebar-collapsed" : ""}`}>
++        <a className="skip-link" href="#main-content">
++          {skipToContentLabel}
++        </a>
++        <aside className="app-sidebar">
++          <div className="app-sidebar-top">{sidebarTop}</div>
++          <div className="app-sidebar-locale">{sidebarLocale}</div>
++          {sidebarUser}
++        </aside>
++        <div className="app-main">
++          <header className="app-header">
++            <div className="app-header-leading">
++              {collapsed ? <AppSidebarToggle variant="expand" /> : null}
++              <div className="app-header-copy">
++                <h1>{title}</h1>
++                {description ? <p>{description}</p> : null}
++              </div>
++            </div>
++            <div className="app-header-actions">
++              <LanguageSelector />
++              {actions}
++              {clerkReady ? <AppMobileSignOut /> : null}
++            </div>
++          </header>
++          <main className="app-content" id="main-content">
++            {children}
++          </main>
++        </div>
++        <AppBottomNav />
++      </div>
++    </SidebarLayoutProvider>
++  );
++}
+diff --git a/components/layout/app-shell.tsx b/components/layout/app-shell.tsx
+index 0243579..5091900 100644
+--- a/components/layout/app-shell.tsx
++++ b/components/layout/app-shell.tsx
+@@ -1,8 +1,8 @@
+ import type { ReactNode } from "react";
+ import { LanguageSelector } from "@/components/i18n/language-selector";
+-import { AppBottomNav } from "@/components/layout/app-bottom-nav";
+-import { AppMobileSignOut } from "@/components/layout/app-mobile-sign-out";
++import { AppShellLayout } from "@/components/layout/app-shell-layout";
+ import { AppSidebarNav } from "@/components/layout/app-sidebar-nav";
++import { AppSidebarToggle } from "@/components/layout/app-sidebar-toggle";
+ import { AppSidebarUser } from "@/components/layout/app-sidebar-user";
+ import { isClerkConfigured } from "@/lib/clerk/config";
+ import { getTranslations } from "@/lib/i18n/server";
+@@ -19,37 +19,25 @@ export async function AppShell({ title, description, actions, children }: AppShe
+   const clerkReady = isClerkConfigured();
+ 
+   return (
+-    <div className="app-shell">
+-      <a className="skip-link" href="#main-content">
+-        {t("app.skipToContent")}
+-      </a>
+-      <aside className="app-sidebar">
+-        <div className="app-sidebar-top">
+-          <p className="app-sidebar-brand">{t("app.name")}</p>
+-          <AppSidebarNav />
+-        </div>
+-        <div className="app-sidebar-locale">
+-          <LanguageSelector />
+-        </div>
+-        <AppSidebarUser />
+-      </aside>
+-      <div className="app-main">
+-        <header className="app-header">
+-          <div className="app-header-copy">
+-            <h1>{title}</h1>
+-            {description ? <p>{description}</p> : null}
+-          </div>
+-          <div className="app-header-actions">
+-            <LanguageSelector />
+-            {actions}
+-            {clerkReady ? <AppMobileSignOut /> : null}
++    <AppShellLayout
++      actions={actions}
++      clerkReady={clerkReady}
++      description={description}
++      sidebarLocale={<LanguageSelector />}
++      sidebarTop={
++        <>
++          <div className="app-sidebar-brand-row">
++            <p className="app-sidebar-brand">{t("app.name")}</p>
++            <AppSidebarToggle variant="collapse" />
+           </div>
+-        </header>
+-        <main className="app-content" id="main-content">
+-          {children}
+-        </main>
+-      </div>
+-      <AppBottomNav />
+-    </div>
++          <AppSidebarNav />
++        </>
++      }
++      sidebarUser={<AppSidebarUser />}
++      skipToContentLabel={t("app.skipToContent")}
++      title={title}
++    >
++      {children}
++    </AppShellLayout>
+   );
+ }
+diff --git a/components/layout/app-sidebar-toggle.tsx b/components/layout/app-sidebar-toggle.tsx
+new file mode 100644
+index 0000000..e8380e3
+--- /dev/null
++++ b/components/layout/app-sidebar-toggle.tsx
+@@ -0,0 +1,46 @@
++"use client";
++
++import { useSidebarLayout } from "@/components/layout/sidebar-layout-context";
++import { useTranslations } from "@/lib/i18n/client";
++
++type AppSidebarToggleProps = {
++  variant: "collapse" | "expand";
++};
++
++export function AppSidebarToggle({ variant }: AppSidebarToggleProps) {
++  const { toggleSidebar } = useSidebarLayout();
++  const { t } = useTranslations();
++  const label = variant === "collapse" ? t("nav.hideSidebar") : t("nav.showSidebar");
++
++  return (
++    <button
++      aria-expanded={variant === "expand"}
++      aria-label={label}
++      className={`app-sidebar-toggle${variant === "expand" ? " app-header-sidebar-toggle" : ""}`}
++      onClick={toggleSidebar}
++      title={label}
++      type="button"
++    >
++      {variant === "collapse" ? (
++        <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 18 18" width="18">
++          <path
++            d="M6.75 4.5 3.75 9l3 4.5M3.75 9h10.5"
++            stroke="currentColor"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            strokeWidth="1.5"
++          />
++        </svg>
++      ) : (
++        <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 18 18" width="18">
++          <path
++            d="M3.75 4.5h10.5M3.75 9h10.5M3.75 13.5h10.5"
++            stroke="currentColor"
++            strokeLinecap="round"
++            strokeWidth="1.5"
++          />
++        </svg>
++      )}
++    </button>
++  );
++}
+diff --git a/components/layout/sidebar-layout-context.tsx b/components/layout/sidebar-layout-context.tsx
+new file mode 100644
+index 0000000..7d0635a
+--- /dev/null
++++ b/components/layout/sidebar-layout-context.tsx
+@@ -0,0 +1,32 @@
++"use client";
++
++import { createContext, useContext, type ReactNode } from "react";
++
++type SidebarLayoutContextValue = {
++  collapsed: boolean;
++  toggleSidebar: () => void;
++};
++
++const SidebarLayoutContext = createContext<SidebarLayoutContextValue | null>(null);
++
++export function SidebarLayoutProvider({
++  collapsed,
++  toggleSidebar,
++  children,
++}: SidebarLayoutContextValue & { children: ReactNode }) {
++  return (
++    <SidebarLayoutContext.Provider value={{ collapsed, toggleSidebar }}>
++      {children}
++    </SidebarLayoutContext.Provider>
++  );
++}
++
++export function useSidebarLayout() {
++  const context = useContext(SidebarLayoutContext);
++
++  if (!context) {
++    throw new Error("useSidebarLayout must be used within SidebarLayoutProvider");
++  }
++
++  return context;
++}
+diff --git a/components/layout/use-sidebar-collapsed.ts b/components/layout/use-sidebar-collapsed.ts
+new file mode 100644
+index 0000000..9f94cb0
+--- /dev/null
++++ b/components/layout/use-sidebar-collapsed.ts
+@@ -0,0 +1,52 @@
++"use client";
++
++import { useCallback, useSyncExternalStore } from "react";
++
++const SIDEBAR_COLLAPSED_STORAGE_KEY = "my-expense-tracker-sidebar-collapsed";
++const SIDEBAR_COLLAPSED_CHANGE_EVENT = "sidebar-collapsed-change";
++
++function subscribe(onStoreChange: () => void) {
++  window.addEventListener("storage", onStoreChange);
++  window.addEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
++
++  return () => {
++    window.removeEventListener("storage", onStoreChange);
++    window.removeEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
++  };
++}
++
++function getSidebarCollapsedSnapshot() {
++  try {
++    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
++  } catch {
++    return false;
++  }
++}
++
++function getSidebarCollapsedServerSnapshot() {
++  return false;
++}
++
++function writeSidebarCollapsed(next: boolean) {
++  try {
++    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
++  } catch {
++    // Ignore storage failures (private mode, quota, etc.).
++  }
++
++  window.dispatchEvent(new Event(SIDEBAR_COLLAPSED_CHANGE_EVENT));
++}
++
++export function useSidebarCollapsed() {
++  const collapsed = useSyncExternalStore(
++    subscribe,
++    getSidebarCollapsedSnapshot,
++    getSidebarCollapsedServerSnapshot,
++  );
++
++  const toggleSidebar = useCallback(() => {
++    writeSidebarCollapsed(!getSidebarCollapsedSnapshot());
++  }, []);
++
++  return { collapsed, toggleSidebar };
++}
+diff --git a/lib/i18n/messages/en.ts b/lib/i18n/messages/en.ts
+index 57e647a..2fe4975 100644
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -27,6 +27,8 @@ export const enMessages: Messages = {
+     projectWorkspace: "Project workspace navigation",
+     backToProjects: "← Back to My Projects",
+     howItWorks: "How it works?",
++    hideSidebar: "Hide sidebar",
++    showSidebar: "Show sidebar",
+   },
+   common: {
+     save: "Save",
+diff --git a/lib/i18n/messages/fr.ts b/lib/i18n/messages/fr.ts
+index 7d93b5c..1c31085 100644
+--- a/lib/i18n/messages/fr.ts
++++ b/lib/i18n/messages/fr.ts
+@@ -27,6 +27,8 @@ export const frMessages: Messages = {
+     projectWorkspace: "Navigation du projet",
+     backToProjects: "← Retour à Mes Projets",
+     howItWorks: "Comment ça marche ?",
++    hideSidebar: "Masquer le menu latéral",
++    showSidebar: "Afficher le menu latéral",
+   },
+   common: {
+     save: "Enregistrer",
+diff --git a/lib/i18n/messages/pt.ts b/lib/i18n/messages/pt.ts
+index bd886c5..41fa525 100644
+--- a/lib/i18n/messages/pt.ts
++++ b/lib/i18n/messages/pt.ts
+@@ -27,6 +27,8 @@ export const ptMessages: Messages = {
+     projectWorkspace: "Navegação do projeto",
+     backToProjects: "← Voltar aos Meus Projetos",
+     howItWorks: "Como funciona?",
++    hideSidebar: "Ocultar menu lateral",
++    showSidebar: "Mostrar menu lateral",
+   },
+   common: {
+     save: "Guardar",
+diff --git a/lib/i18n/types.ts b/lib/i18n/types.ts
+index 5998038..e9bba8a 100644
+--- a/lib/i18n/types.ts
++++ b/lib/i18n/types.ts
+@@ -29,6 +29,8 @@ export type Messages = {
+     projectWorkspace: string;
+     backToProjects: string;
+     howItWorks: string;
++    hideSidebar: string;
++    showSidebar: string;
+   };
+   common: {
+     save: string;
+-- 
+2.43.0
+
